@@ -15,9 +15,30 @@ import { createClient } from '@supabase/supabase-js';
  * vorhandener Config — Notfall-Schalter, falls am Backend was kaputt ist.
  */
 
-const url = import.meta.env.VITE_SUPABASE_URL;
+const rawUrl = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const enabled = import.meta.env.VITE_SYNC_ENABLED !== 'false';
+
+/**
+ * URL säubern — Trailing-Slash und versehentlich angehängte /rest/v1
+ * entfernen. Im Dashboard tauchen mehrere URL-Schreibweisen auf, das
+ * verwirrt; supabase-js will aber nur die nackte Domain.
+ */
+function normalizeUrl(u) {
+  if (!u) return u;
+  let cleaned = u.trim().replace(/\/+$/, '');
+  cleaned = cleaned.replace(/\/rest\/v1$/, '');
+  return cleaned;
+}
+
+const url = normalizeUrl(rawUrl);
+
+if (rawUrl && url !== rawUrl) {
+  console.warn(
+    `[supabase] VITE_SUPABASE_URL wurde zu "${url}" normalisiert (war "${rawUrl}"). ` +
+      `Bitte den ENV-Wert auf die nackte Project-URL ohne /rest/v1 setzen.`
+  );
+}
 
 export const supabaseClient =
   enabled && url && key

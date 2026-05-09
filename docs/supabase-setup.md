@@ -49,6 +49,8 @@ Damit sind die drei Tabellen `items`, `my_products`, `shelf_life_presets` mit In
 
 > ⚠️ Der **anon public key** darf öffentlich sein — RLS schützt deine Daten. Der **service role key** dagegen NIEMALS in die App, der bypassed RLS und gibt Vollzugriff. Den brauchen wir nicht.
 
+> 🚨 **Die Project URL ist die NACKTE Domain**, also `https://abcd1234.supabase.co` — **OHNE** `/rest/v1` am Ende. Im Dashboard wird manchmal eine API URL mit `/rest/v1` angezeigt; die ist falsch für unseren Use-Case. Falls du dich vertippst, normalisiert der Code das inzwischen automatisch und gibt eine Konsolen-Warnung aus, aber sauber ist es so wie oben.
+
 ## 5. ENV-Variablen setzen
 
 ### Lokal (für `npm run dev`)
