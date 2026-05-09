@@ -1,6 +1,16 @@
 import { defineStore } from 'pinia';
 import { db } from '../db/database.js';
 import { daysUntil } from '../db/schema.js';
+import { useSyncStore } from './syncStore.js';
+
+function pushToSync(record) {
+  try {
+    const sync = useSyncStore();
+    sync.queuePush('shelf_life_presets', record);
+  } catch {
+    /* ignore in test envs */
+  }
+}
 
 /**
  * Auto-gelernte Standard-Haltbarkeiten pro Item-Name.
@@ -23,6 +33,11 @@ export const useShelfLifeStore = defineStore('shelfLife', {
       this.loaded = true;
     },
 
+    async reload() {
+      const rows = await db.shelf_life_presets.toArray();
+      this.presets = new Map(rows.map((r) => [r.name_lower, r]));
+    },
+
     /**
      * Berechnet die Tages-Differenz (Anlagedatum → MHD) und persistiert sie
      * als Preset für diesen Namen. Negative Differenzen (= bereits abgelaufen)
@@ -42,6 +57,7 @@ export const useShelfLifeStore = defineStore('shelfLife', {
       };
       await db.shelf_life_presets.put(record);
       this.presets.set(key, record);
+      pushToSync(record);
     },
 
     /** Liefert die hinterlegte Tagezahl oder null. */

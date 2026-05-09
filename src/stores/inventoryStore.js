@@ -1,6 +1,18 @@
 import { defineStore } from 'pinia';
 import { db } from '../db/database.js';
 import { newItem, LOCATIONS } from '../db/schema.js';
+import { useSyncStore } from './syncStore.js';
+
+function pushToSync(record) {
+  // Lazy import des Stores, weil syncStore selbst auth+supabase importiert.
+  // Bei Lokal-Only-Modus (kein Login) ist queuePush ein no-op.
+  try {
+    const sync = useSyncStore();
+    sync.queuePush('items', record);
+  } catch {
+    /* Pinia evtl. nicht initialisiert — z.B. in Tests. Ignorieren. */
+  }
+}
 
 /**
  * Zentraler Store für Vorrats-Items.
@@ -74,7 +86,17 @@ export const useInventoryStore = defineStore('inventory', {
       await db.items.add(record);
       this.items.push(record);
       this._resort();
+      pushToSync(record);
       return record;
+    },
+
+    /**
+     * Reload aus Dexie. Wird vom Sync-Store nach Realtime-Änderungen
+     * aufgerufen, damit die UI den frischen Stand zeigt.
+     */
+    async reload() {
+      const rows = await db.items.toArray();
+      this.items = sortByExpiry(rows);
     },
 
     /** Felder eines bestehenden Items überschreiben. */
@@ -87,6 +109,7 @@ export const useInventoryStore = defineStore('inventory', {
       await db.items.update(id, safePatch);
       Object.assign(target, safePatch);
       this._resort();
+      pushToSync(target);
       return target;
     },
 
@@ -102,6 +125,7 @@ export const useInventoryStore = defineStore('inventory', {
       await db.items.update(id, { deleted_at: now, updated_at: now });
       target.deleted_at = now;
       target.updated_at = now;
+      pushToSync(target);
       return target;
     },
 
@@ -114,6 +138,7 @@ export const useInventoryStore = defineStore('inventory', {
       target.deleted_at = null;
       target.updated_at = now;
       this._resort();
+      pushToSync(target);
       return target;
     },
 
@@ -159,6 +184,8 @@ export const useInventoryStore = defineStore('inventory', {
         await db.items.add(splitRecord);
         this.items.push(splitRecord);
         this._resort();
+        pushToSync(target);
+        pushToSync(splitRecord);
         return { kind: 'split', original: target, splitItem: splitRecord };
       }
 
@@ -170,6 +197,7 @@ export const useInventoryStore = defineStore('inventory', {
       };
       await db.items.update(id, patch);
       Object.assign(target, patch);
+      pushToSync(target);
       return { kind: 'toggled', item: target };
     },
 
@@ -183,10 +211,18 @@ export const useInventoryStore = defineStore('inventory', {
       if (!original || !splitItem) {
         throw new Error('Original oder Split-Item nicht gefunden.');
       }
+      // Cloud-seitig kennen wir kein Hard-Delete für Sync — wir machen den
+      // Split-Eintrag soft-deletet (setzt deleted_at), Cloud bekommt das
+      // mit, lokal löschen wir hart aus der UI.
+      const now = new Date().toISOString();
+      const tombstone = { ...splitItem, deleted_at: now, updated_at: now };
       await db.items.delete(splitItemId);
       this.items = this.items.filter((i) => i.id !== splitItemId);
+      // Trotzdem an die Cloud schicken (mit deleted_at), damit Geräte B
+      // den Split-Eintrag auch verschwinden lässt.
+      pushToSync(tombstone);
+
       const newQty = original.quantity + splitItem.quantity;
-      const now = new Date().toISOString();
       await db.items.update(originalId, {
         quantity: newQty,
         updated_at: now
@@ -194,6 +230,7 @@ export const useInventoryStore = defineStore('inventory', {
       original.quantity = newQty;
       original.updated_at = now;
       this._resort();
+      pushToSync(original);
     },
 
     /**
@@ -210,6 +247,7 @@ export const useInventoryStore = defineStore('inventory', {
       };
       await db.items.update(id, patch);
       Object.assign(target, patch);
+      pushToSync(target);
       return target;
     },
 
@@ -234,6 +272,7 @@ export const useInventoryStore = defineStore('inventory', {
       await db.items.update(id, { quantity: next, updated_at: now });
       target.quantity = next;
       target.updated_at = now;
+      pushToSync(target);
       return { kind: 'updated', item: target };
     },
 
@@ -259,6 +298,7 @@ export const useInventoryStore = defineStore('inventory', {
       await db.items.update(id, patch);
       Object.assign(target, patch);
       this._resort();
+      pushToSync(target);
       return { item: target, snapshot };
     },
 
@@ -271,6 +311,7 @@ export const useInventoryStore = defineStore('inventory', {
       await db.items.update(id, patch);
       Object.assign(target, patch);
       this._resort();
+      pushToSync(target);
       return target;
     },
 

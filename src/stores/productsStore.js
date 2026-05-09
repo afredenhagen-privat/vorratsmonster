@@ -1,6 +1,16 @@
 import { defineStore } from 'pinia';
 import { db } from '../db/database.js';
 import { fetchProduct } from '../services/openFoodFacts.js';
+import { useSyncStore } from './syncStore.js';
+
+function pushToSync(record) {
+  try {
+    const sync = useSyncStore();
+    sync.queuePush('my_products', record);
+  } catch {
+    /* ignore in test envs */
+  }
+}
 
 /**
  * Eigene persistente Produkt-Datenbank, keyed by Barcode.
@@ -64,6 +74,7 @@ export const useProductsStore = defineStore('products', {
         deleted_at: null
       };
       await db.my_products.put(record);
+      pushToSync(record);
       return record;
     }
   }

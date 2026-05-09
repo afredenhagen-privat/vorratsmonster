@@ -6,6 +6,7 @@ import { useInventoryStore } from '../stores/inventoryStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { LOCATION_LABELS, LOCATIONS } from '../db/schema.js';
 import InventoryItem from '../components/InventoryItem.vue';
+import SyncStatus from '../components/SyncStatus.vue';
 
 const router = useRouter();
 const inventory = useInventoryStore();
@@ -50,11 +51,14 @@ function clearBarcodeFilter() {
 
 <template>
   <div class="mx-auto flex max-w-md flex-col gap-3 p-4 pb-32">
-    <header class="flex items-center justify-between">
+    <header class="flex items-center justify-between gap-2">
       <h1 class="text-2xl font-semibold">Vorrat</h1>
-      <RouterLink to="/item/new?manual=1" class="btn-secondary text-xs">
-        + Manuell
-      </RouterLink>
+      <div class="flex items-center gap-2">
+        <SyncStatus />
+        <RouterLink to="/item/new?manual=1" class="btn-secondary text-xs">
+          + Manuell
+        </RouterLink>
+      </div>
     </header>
 
     <div class="flex items-center gap-2">

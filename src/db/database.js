@@ -56,6 +56,15 @@ db.version(2)
     }
   });
 
+// v3: Offline-Sync-Queue für Supabase. Jede mutierende lokale Operation
+// landet hier zwischen, bis der Sync-Layer sie ans Backend pushen kann.
+db.version(3).stores({
+  items: 'id, barcode, name, best_before, location, deleted_at, updated_at',
+  my_products: 'barcode, source, updated_at, deleted_at',
+  shelf_life_presets: 'name_lower, updated_at',
+  sync_queue: 'id, table_name, key, created_at'
+});
+
 export async function initDatabase() {
   if (!db.isOpen()) {
     await db.open();
