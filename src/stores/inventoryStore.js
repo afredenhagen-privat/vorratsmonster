@@ -118,14 +118,50 @@ export const useInventoryStore = defineStore('inventory', {
     },
 
     /**
-     * Anbruch-Toggle. Setzt is_opened und opened_at synchron.
-     * Liefert den Item-Stand nach dem Toggle zurück, damit die UI
-     * eine Undo-Snackbar mit dem alten Zustand anzeigen kann.
+     * Anbruch-Toggle.
+     *
+     * Logik:
+     *   - Wenn das Item ungeöffnet ist UND quantity > 1: SPLIT.
+     *     Original wird auf quantity - 1 reduziert, ein neuer Eintrag mit
+     *     quantity = 1 und is_opened = true entsteht. Begründung: Anbruch
+     *     ist eine Property einer einzelnen Packung, nicht der ganzen Charge.
+     *   - Sonst: einfacher Flag-Toggle.
+     *
+     * Ergebnis:
+     *   { kind: 'toggled', item }              – Standard-Toggle
+     *   { kind: 'split', original, splitItem } – ein Stück abgelöst und
+     *                                              angebrochen markiert
      */
     async toggleOpened(id) {
       const target = this.byId(id);
       if (!target) throw new Error('Item nicht gefunden.');
       const now = new Date().toISOString();
+
+      if (!target.is_opened && target.quantity > 1) {
+        const newQty = target.quantity - 1;
+        await db.items.update(id, { quantity: newQty, updated_at: now });
+        target.quantity = newQty;
+        target.updated_at = now;
+
+        const splitRecord = newItem({
+          barcode: target.barcode,
+          name: target.name,
+          brand: target.brand,
+          image_url: target.image_url,
+          category: target.category,
+          quantity: 1,
+          best_before: target.best_before,
+          location: target.location,
+          is_opened: true
+        });
+        // newItem() erlaubt is_opened, setzt opened_at aber selbst nicht.
+        splitRecord.opened_at = now;
+        await db.items.add(splitRecord);
+        this.items.push(splitRecord);
+        this._resort();
+        return { kind: 'split', original: target, splitItem: splitRecord };
+      }
+
       const next = !target.is_opened;
       const patch = {
         is_opened: next,
@@ -134,7 +170,30 @@ export const useInventoryStore = defineStore('inventory', {
       };
       await db.items.update(id, patch);
       Object.assign(target, patch);
-      return target;
+      return { kind: 'toggled', item: target };
+    },
+
+    /**
+     * Inverse von toggleOpened mit Split-Result. Hard-deleted das Split-Item
+     * und addiert seine Menge auf das Original zurück.
+     */
+    async undoSplit(originalId, splitItemId) {
+      const original = this.byId(originalId);
+      const splitItem = this.byId(splitItemId);
+      if (!original || !splitItem) {
+        throw new Error('Original oder Split-Item nicht gefunden.');
+      }
+      await db.items.delete(splitItemId);
+      this.items = this.items.filter((i) => i.id !== splitItemId);
+      const newQty = original.quantity + splitItem.quantity;
+      const now = new Date().toISOString();
+      await db.items.update(originalId, {
+        quantity: newQty,
+        updated_at: now
+      });
+      original.quantity = newQty;
+      original.updated_at = now;
+      this._resort();
     },
 
     /**

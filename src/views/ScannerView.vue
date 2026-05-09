@@ -12,7 +12,10 @@ const mode = computed(() => (route.query.mode === 'filter' ? 'filter' : 'add'));
 const videoRef = ref(null);
 const error = ref(null);
 const supported = ref('BarcodeDetector' in window);
+const torchSupported = ref(false);
+const torchOn = ref(false);
 let stream = null;
+let videoTrack = null;
 let detector = null;
 let rafId = null;
 let stopped = false;
@@ -23,9 +26,22 @@ onMounted(async () => {
     detector = new window.BarcodeDetector({
       formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e']
     });
+    // Höhere Auflösung + Continuous-Auto-Focus, fällt graceful zurück, falls
+    // der Browser eines der Constraints nicht kennt.
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        // advanced wird best-effort angewandt; nicht-unterstützte Optionen
+        // werden ignoriert, ohne den Stream-Aufbau scheitern zu lassen.
+        advanced: [{ focusMode: 'continuous' }]
+      }
     });
+    videoTrack = stream.getVideoTracks()[0];
+    // Torch-Capability prüfen (nur Android Chrome > Hardware mit Blitz)
+    const caps = videoTrack?.getCapabilities?.() ?? {};
+    torchSupported.value = caps.torch === true;
     if (videoRef.value) {
       videoRef.value.srcObject = stream;
       await videoRef.value.play();
@@ -35,6 +51,18 @@ onMounted(async () => {
     error.value = e.message || 'Kamera-Zugriff fehlgeschlagen.';
   }
 });
+
+async function toggleTorch() {
+  if (!videoTrack || !torchSupported.value) return;
+  try {
+    torchOn.value = !torchOn.value;
+    await videoTrack.applyConstraints({
+      advanced: [{ torch: torchOn.value }]
+    });
+  } catch {
+    torchOn.value = false;
+  }
+}
 
 onBeforeUnmount(() => {
   stopped = true;
@@ -88,10 +116,22 @@ function manualFallback() {
     </button>
 
     <div
-      class="absolute right-4 top-4 z-10 rounded-full bg-black/60 px-3 py-1 text-xs"
+      class="absolute right-4 top-4 z-10 flex items-center gap-2"
       style="margin-top: env(safe-area-inset-top)"
     >
-      {{ mode === 'filter' ? 'Filter-Scan' : 'Anlegen' }}
+      <button
+        v-if="torchSupported"
+        type="button"
+        class="rounded-full px-3 py-1 text-sm"
+        :class="torchOn ? 'bg-yellow-400 text-black' : 'bg-black/60 text-white'"
+        :title="torchOn ? 'Licht aus' : 'Licht an'"
+        @click="toggleTorch"
+      >
+        {{ torchOn ? '💡 An' : '💡' }}
+      </button>
+      <div class="rounded-full bg-black/60 px-3 py-1 text-xs">
+        {{ mode === 'filter' ? 'Filter-Scan' : 'Anlegen' }}
+      </div>
     </div>
 
     <video

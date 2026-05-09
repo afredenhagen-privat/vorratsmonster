@@ -122,23 +122,65 @@ describe('inventoryStore.update', () => {
 });
 
 describe('inventoryStore.toggleOpened / setOpened', () => {
-  it('toggleOpened flippt is_opened und setzt opened_at', async () => {
+  it('toggleOpened bei quantity=1: flippt is_opened und setzt opened_at', async () => {
     const store = useInventoryStore();
     const item = await store.create({
       name: 'Joghurt',
+      quantity: 1,
       best_before: '2026-06-01',
       location: 'fridge'
     });
     expect(item.is_opened).toBe(false);
-    expect(item.opened_at).toBeNull();
 
-    await store.toggleOpened(item.id);
+    const r1 = await store.toggleOpened(item.id);
+    expect(r1.kind).toBe('toggled');
     expect(store.byId(item.id).is_opened).toBe(true);
     expect(store.byId(item.id).opened_at).toBeTruthy();
 
-    await store.toggleOpened(item.id);
+    const r2 = await store.toggleOpened(item.id);
+    expect(r2.kind).toBe('toggled');
     expect(store.byId(item.id).is_opened).toBe(false);
     expect(store.byId(item.id).opened_at).toBeNull();
+  });
+
+  it('toggleOpened bei quantity>1: SPLIT (Original -1, neues angebrochenes Item)', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Joghurt',
+      quantity: 3,
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+
+    const result = await store.toggleOpened(item.id);
+    expect(result.kind).toBe('split');
+    expect(result.original.quantity).toBe(2);
+    expect(result.original.is_opened).toBe(false);
+    expect(result.splitItem.quantity).toBe(1);
+    expect(result.splitItem.is_opened).toBe(true);
+    expect(result.splitItem.opened_at).toBeTruthy();
+    expect(result.splitItem.id).not.toBe(item.id);
+    // Beide Items sind aktiv
+    expect(store.active.length).toBe(2);
+    // Charge-Daten kopiert
+    expect(result.splitItem.name).toBe('Joghurt');
+    expect(result.splitItem.best_before).toBe('2026-06-01');
+    expect(result.splitItem.location).toBe('fridge');
+  });
+
+  it('undoSplit: löscht Split-Item, addiert Menge zurück', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Joghurt',
+      quantity: 3,
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    const { original, splitItem } = await store.toggleOpened(item.id);
+    await store.undoSplit(original.id, splitItem.id);
+    expect(store.active.length).toBe(1);
+    expect(store.byId(item.id).quantity).toBe(3);
+    expect(store.byId(splitItem.id)).toBeUndefined();
   });
 
   it('setOpened mit konkretem Wert (für Undo)', async () => {

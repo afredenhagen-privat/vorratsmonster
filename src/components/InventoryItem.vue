@@ -27,39 +27,65 @@ const { onTouchStart, onTouchMove, onTouchEnd, dx, tracking } = useSwipe({
 });
 
 async function toggleOpened() {
+  const id = props.item.id;
+  const name = props.item.name;
   const wasOpened = props.item.is_opened;
   const wasOpenedAt = props.item.opened_at;
-  await inventory.toggleOpened(props.item.id);
-  ui.showSnackbar({
-    message: props.item.is_opened ? 'Als angebrochen markiert.' : 'Anbruch zurückgesetzt.',
-    action: {
-      label: 'Rückgängig',
-      handler: async () => {
-        await inventory.setOpened(props.item.id, wasOpened, wasOpenedAt);
-      }
-    }
-  });
+  const result = await inventory.toggleOpened(id);
+  if (result.kind === 'split') {
+    ui.queueUndoable(
+      `1 Stück "${name}" als angebrochen abgelöst.`,
+      async () => {
+        await inventory.undoSplit(result.original.id, result.splitItem.id);
+      },
+      `Anbruch (${name})`
+    );
+  } else {
+    ui.queueUndoable(
+      result.item.is_opened ? 'Als angebrochen markiert.' : 'Anbruch zurückgesetzt.',
+      async () => {
+        await inventory.setOpened(id, wasOpened, wasOpenedAt);
+      },
+      `Anbruch-Toggle (${name})`
+    );
+  }
 }
 
 async function decrement() {
-  const result = await inventory.setQuantity(props.item.id, -1);
+  const id = props.item.id;
+  const name = props.item.name;
+  const beforeQty = props.item.quantity;
+  const result = await inventory.setQuantity(id, -1);
   if (result.kind === 'deleted') {
-    const id = props.item.id;
-    const name = props.item.name;
-    ui.showSnackbar({
-      message: `"${name}" verbraucht.`,
-      action: {
-        label: 'Rückgängig',
-        handler: async () => {
-          await inventory.restore(id);
-        }
-      }
-    });
+    ui.queueUndoable(
+      `"${name}" verbraucht.`,
+      async () => {
+        await inventory.restore(id);
+      },
+      `Verbrauchen (${name})`
+    );
+  } else {
+    ui.queueUndoable(
+      `"${name}" auf ${result.item.quantity} reduziert.`,
+      async () => {
+        await inventory.setQuantity(id, beforeQty - result.item.quantity);
+      },
+      `Menge − (${name})`
+    );
   }
 }
 
 async function increment() {
-  await inventory.setQuantity(props.item.id, 1);
+  const id = props.item.id;
+  const name = props.item.name;
+  await inventory.setQuantity(id, 1);
+  ui.queueUndoable(
+    `"${name}" auf ${props.item.quantity} erhöht.`,
+    async () => {
+      await inventory.setQuantity(id, -1);
+    },
+    `Menge + (${name})`
+  );
 }
 </script>
 

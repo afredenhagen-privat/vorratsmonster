@@ -16,13 +16,15 @@ const dateInputRef = ref(null);
 watch(
   () => props.modelValue,
   (next) => {
-    // Wenn von außen ein neuer Wert kommt (z.B. Preset oder Edit-Mode),
-    // den raw-Text aktualisieren — aber nur wenn er aktuell nicht den
-    // gleichen Wert ergibt (sonst überschreiben wir gerade getippten Text).
-    const currentParsed = parseDate(raw.value);
-    if (currentParsed !== next) {
-      raw.value = next ? formatDeDate(next) : '';
-    }
+    // Selbst-emittiert (raw-Inhalt parsed bereits zum gleichen Wert) →
+    // nichts tun.
+    if (parseDate(raw.value) === next) return;
+    // Wir haben gerade einen leeren modelValue bekommen, aber das
+    // Eingabefeld ist nicht leer → der User tippt eine unfertige Eingabe
+    // (z.B. "31.0" oder "1602.20"). Nicht überschreiben — sonst leert
+    // sich das Feld mitten in der Eingabe.
+    if (!next && raw.value.trim() !== '') return;
+    raw.value = next ? formatDeDate(next) : '';
   }
 );
 

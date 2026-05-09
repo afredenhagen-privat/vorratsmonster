@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { useUndoStore } from './undoStore.js';
 
 const SNACKBAR_DURATION_MS = 5000;
 
@@ -57,6 +58,38 @@ export const useUiStore = defineStore('ui', {
         sb.action.handler();
       }
       this.dismissSnackbar();
+    },
+
+    /**
+     * Bequemer Helper: zeigt eine 5-Sekunden-Snackbar mit „Rückgängig"-Action
+     * UND pusht denselben Undo-Schritt auf den persistenten Undo-Stack
+     * (`useUndoStore`). Wenn der User die Snackbar verpasst, kann er später
+     * den globalen Undo-Button benutzen.
+     *
+     * Beim Klick auf „Rückgängig" wird der Eintrag aus dem Stack entfernt
+     * (damit er nicht zweimal greifen kann).
+     */
+    queueUndoable(message, undoFn, description = null) {
+      const undo = useUndoStore();
+      // Eintrag pushen, ID merken
+      const before = undo.stack.length;
+      undo.push({ description: description ?? message, undoFn });
+      const stackEntry = undo.stack[undo.stack.length - 1];
+      this.showSnackbar({
+        message,
+        action: {
+          label: 'Rückgängig',
+          handler: async () => {
+            // Wenn der Eintrag noch im Stack ist, entfernen + ausführen.
+            const idx = undo.stack.findIndex((e) => e.id === stackEntry.id);
+            if (idx !== -1) {
+              const [entry] = undo.stack.splice(idx, 1);
+              await entry.undoFn();
+            }
+          }
+        }
+      });
+      return stackEntry;
     },
 
     dismissSnackbar() {

@@ -26,50 +26,54 @@ async function consume() {
   const id = item.value.id;
   const name = item.value.name;
   await inventory.softDelete(id);
-  ui.showSnackbar({
-    message: `"${name}" verbraucht.`,
-    action: {
-      label: 'Rückgängig',
-      handler: async () => {
-        await inventory.restore(id);
-      }
-    }
-  });
+  ui.queueUndoable(
+    `"${name}" verbraucht.`,
+    async () => {
+      await inventory.restore(id);
+    },
+    `Verbrauchen (${name})`
+  );
   router.replace({ name: 'inventory' });
 }
 
 async function toggleOpened() {
   if (!item.value) return;
   const id = item.value.id;
+  const name = item.value.name;
   const wasOpened = item.value.is_opened;
   const wasOpenedAt = item.value.opened_at;
-  await inventory.toggleOpened(id);
-  ui.showSnackbar({
-    message: item.value.is_opened
-      ? 'Als angebrochen markiert.'
-      : 'Anbruch zurückgesetzt.',
-    action: {
-      label: 'Rückgängig',
-      handler: async () => {
+  const result = await inventory.toggleOpened(id);
+  if (result.kind === 'split') {
+    ui.queueUndoable(
+      `1 Stück "${name}" als angebrochen abgelöst.`,
+      async () => {
+        await inventory.undoSplit(result.original.id, result.splitItem.id);
+      },
+      `Anbruch (${name})`
+    );
+  } else {
+    ui.queueUndoable(
+      result.item.is_opened ? 'Als angebrochen markiert.' : 'Anbruch zurückgesetzt.',
+      async () => {
         await inventory.setOpened(id, wasOpened, wasOpenedAt);
-      }
-    }
-  });
+      },
+      `Anbruch-Toggle (${name})`
+    );
+  }
 }
 
 async function freeze() {
   if (!item.value) return;
   const id = item.value.id;
+  const name = item.value.name;
   const { snapshot } = await inventory.freeze(id);
-  ui.showSnackbar({
-    message: `Eingefroren · MHD +6 Monate (${formatDeDate(item.value.best_before)}).`,
-    action: {
-      label: 'Rückgängig',
-      handler: async () => {
-        await inventory.restoreSnapshot(id, snapshot);
-      }
-    }
-  });
+  ui.queueUndoable(
+    `Eingefroren · MHD +6 Monate (${formatDeDate(item.value.best_before)}).`,
+    async () => {
+      await inventory.restoreSnapshot(id, snapshot);
+    },
+    `Einfrieren (${name})`
+  );
 }
 </script>
 
