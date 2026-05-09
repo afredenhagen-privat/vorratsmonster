@@ -4,6 +4,7 @@ import { useRouter, RouterLink } from 'vue-router';
 import { useInventoryStore } from '../stores/inventoryStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { LOCATION_LABELS } from '../db/schema.js';
+import { formatDeDate } from '../utils/parseDate.js';
 import ExpiryBadge from '../components/ExpiryBadge.vue';
 
 const props = defineProps({
@@ -36,6 +37,40 @@ async function consume() {
   });
   router.replace({ name: 'inventory' });
 }
+
+async function toggleOpened() {
+  if (!item.value) return;
+  const id = item.value.id;
+  const wasOpened = item.value.is_opened;
+  const wasOpenedAt = item.value.opened_at;
+  await inventory.toggleOpened(id);
+  ui.showSnackbar({
+    message: item.value.is_opened
+      ? 'Als angebrochen markiert.'
+      : 'Anbruch zurückgesetzt.',
+    action: {
+      label: 'Rückgängig',
+      handler: async () => {
+        await inventory.setOpened(id, wasOpened, wasOpenedAt);
+      }
+    }
+  });
+}
+
+async function freeze() {
+  if (!item.value) return;
+  const id = item.value.id;
+  const { snapshot } = await inventory.freeze(id);
+  ui.showSnackbar({
+    message: `Eingefroren · MHD +6 Monate (${formatDeDate(item.value.best_before)}).`,
+    action: {
+      label: 'Rückgängig',
+      handler: async () => {
+        await inventory.restoreSnapshot(id, snapshot);
+      }
+    }
+  });
+}
 </script>
 
 <template>
@@ -64,7 +99,7 @@ async function consume() {
         <dt class="text-slate-500">Menge</dt>
         <dd>{{ item.quantity }} Stk</dd>
         <dt class="text-slate-500">MHD</dt>
-        <dd>{{ formatDate(item.best_before) }}</dd>
+        <dd>{{ formatDeDate(item.best_before) }}</dd>
         <dt class="text-slate-500">Lagerort</dt>
         <dd>{{ LOCATION_LABELS[item.location] }}</dd>
         <template v-if="item.barcode">
@@ -78,23 +113,48 @@ async function consume() {
       </dl>
     </div>
 
-    <div class="flex gap-2">
+    <!-- Status -->
+    <div class="card flex items-center justify-between gap-3">
+      <div class="text-sm">
+        <div class="font-medium">Status</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400">
+          {{ item.is_opened ? `angebrochen seit ${formatDeDate((item.opened_at ?? '').slice(0,10))}` : 'ungeöffnet' }}
+        </div>
+      </div>
+      <button
+        type="button"
+        class="chip px-3 py-1.5 text-sm"
+        :class="
+          item.is_opened
+            ? 'bg-amber-500 text-white'
+            : 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200'
+        "
+        @click="toggleOpened"
+      >
+        {{ item.is_opened ? '● Angebrochen' : '○ Angebrochen markieren' }}
+      </button>
+    </div>
+
+    <!-- Aktionen -->
+    <div class="flex flex-wrap gap-2">
       <RouterLink
         :to="{ name: 'item-edit', params: { id: item.id } }"
-        class="btn-secondary flex-1"
+        class="btn-secondary flex-1 min-w-[120px]"
       >
         Bearbeiten
       </RouterLink>
-      <button class="btn-danger flex-1" @click="consume">Verbrauchen</button>
+      <button
+        v-if="item.location !== 'freezer'"
+        type="button"
+        class="btn-secondary flex-1 min-w-[120px]"
+        @click="freeze"
+      >
+        ❄ Einfrieren
+      </button>
+      <button class="btn-danger flex-1 min-w-[120px]" @click="consume">
+        Verbrauchen
+      </button>
     </div>
   </div>
   <div v-else class="p-4 text-sm text-slate-500">Eintrag nicht gefunden.</div>
 </template>
-
-<script>
-function formatDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
-  return `${d}.${m}.${y}`;
-}
-</script>

@@ -121,6 +121,180 @@ describe('inventoryStore.update', () => {
   });
 });
 
+describe('inventoryStore.toggleOpened / setOpened', () => {
+  it('toggleOpened flippt is_opened und setzt opened_at', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Joghurt',
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    expect(item.is_opened).toBe(false);
+    expect(item.opened_at).toBeNull();
+
+    await store.toggleOpened(item.id);
+    expect(store.byId(item.id).is_opened).toBe(true);
+    expect(store.byId(item.id).opened_at).toBeTruthy();
+
+    await store.toggleOpened(item.id);
+    expect(store.byId(item.id).is_opened).toBe(false);
+    expect(store.byId(item.id).opened_at).toBeNull();
+  });
+
+  it('setOpened mit konkretem Wert (für Undo)', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Käse',
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    await store.setOpened(item.id, true, '2026-05-01T10:00:00Z');
+    expect(store.byId(item.id).is_opened).toBe(true);
+    expect(store.byId(item.id).opened_at).toBe('2026-05-01T10:00:00Z');
+  });
+});
+
+describe('inventoryStore.setQuantity', () => {
+  it('positives delta erhöht', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Joghurt',
+      quantity: 3,
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    const result = await store.setQuantity(item.id, 1);
+    expect(result.kind).toBe('updated');
+    expect(store.byId(item.id).quantity).toBe(4);
+  });
+
+  it('negatives delta dekrementiert', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Joghurt',
+      quantity: 3,
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    const result = await store.setQuantity(item.id, -1);
+    expect(result.kind).toBe('updated');
+    expect(store.byId(item.id).quantity).toBe(2);
+  });
+
+  it('delta auf 0 → Soft-Delete', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Letzter Joghurt',
+      quantity: 1,
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    const result = await store.setQuantity(item.id, -1);
+    expect(result.kind).toBe('deleted');
+    expect(store.byId(item.id).deleted_at).not.toBeNull();
+    expect(store.active).toHaveLength(0);
+  });
+
+  it('delta unter 0 wird auf 0 geclampt → Soft-Delete', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'X',
+      quantity: 2,
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    const result = await store.setQuantity(item.id, -10);
+    expect(result.kind).toBe('deleted');
+  });
+});
+
+describe('inventoryStore.freeze', () => {
+  it('setzt location auf freezer und schiebt MHD um 6 Monate', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Brot',
+      best_before: '2026-05-15',
+      location: 'pantry'
+    });
+    const result = await store.freeze(item.id);
+    expect(result.item.location).toBe('freezer');
+    expect(result.item.best_before).toBe('2026-11-15');
+    expect(result.snapshot).toEqual({
+      location: 'pantry',
+      best_before: '2026-05-15'
+    });
+  });
+
+  it('restoreSnapshot rollt zurück (für Undo)', async () => {
+    const store = useInventoryStore();
+    const item = await store.create({
+      name: 'Brot',
+      best_before: '2026-05-15',
+      location: 'pantry'
+    });
+    const { snapshot } = await store.freeze(item.id);
+    await store.restoreSnapshot(item.id, snapshot);
+    expect(store.byId(item.id).location).toBe('pantry');
+    expect(store.byId(item.id).best_before).toBe('2026-05-15');
+  });
+});
+
+describe('inventoryStore.filtered – erweitert', () => {
+  it('filtert nach is_opened', async () => {
+    const store = useInventoryStore();
+    const a = await store.create({
+      name: 'Joghurt',
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    await store.create({
+      name: 'Milch',
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    await store.toggleOpened(a.id);
+    expect(store.filtered({ opened: true }).map((i) => i.name)).toEqual(['Joghurt']);
+  });
+
+  it('filtert nach barcode', async () => {
+    const store = useInventoryStore();
+    await store.create({
+      barcode: '111',
+      name: 'A',
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    await store.create({
+      barcode: '222',
+      name: 'B',
+      best_before: '2026-06-02',
+      location: 'fridge'
+    });
+    expect(store.filtered({ barcode: '111' }).map((i) => i.name)).toEqual(['A']);
+  });
+
+  it('kombiniert mehrere Filter', async () => {
+    const store = useInventoryStore();
+    const a = await store.create({
+      name: 'Joghurt Mango',
+      best_before: '2026-06-01',
+      location: 'fridge'
+    });
+    await store.create({
+      name: 'Joghurt Vanille',
+      best_before: '2026-06-02',
+      location: 'fridge'
+    });
+    await store.toggleOpened(a.id);
+    const result = store.filtered({
+      query: 'mango',
+      location: 'fridge',
+      opened: true
+    });
+    expect(result.map((i) => i.name)).toEqual(['Joghurt Mango']);
+  });
+});
+
 describe('inventoryStore.distinctManualNames', () => {
   it('liefert unique Namen aus manuellen Einträgen, neueste zuerst, ohne Barcode-Items', async () => {
     const store = useInventoryStore();

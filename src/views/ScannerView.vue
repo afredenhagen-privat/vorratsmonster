@@ -1,8 +1,13 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { useUiStore } from '../stores/uiStore.js';
 
 const router = useRouter();
+const route = useRoute();
+const ui = useUiStore();
+
+const mode = computed(() => (route.query.mode === 'filter' ? 'filter' : 'add'));
 
 const videoRef = ref(null);
 const error = ref(null);
@@ -45,17 +50,30 @@ async function tick() {
       const code = codes[0].rawValue;
       if (navigator.vibrate) navigator.vibrate(120);
       stopped = true;
-      router.replace({ name: 'item-new', query: { barcode: code } });
+      onScanned(code);
       return;
     }
   } catch {
-    /* einzelne Fehler ignorieren, weiter scannen */
+    /* einzelne Fehler ignorieren */
   }
   rafId = requestAnimationFrame(tick);
 }
 
+function onScanned(code) {
+  if (mode.value === 'filter') {
+    ui.setBarcodeFilter(code);
+    router.replace({ name: 'inventory' });
+  } else {
+    router.replace({ name: 'item-new', query: { barcode: code } });
+  }
+}
+
 function manualFallback() {
-  router.replace({ name: 'item-new', query: { manual: '1' } });
+  if (mode.value === 'filter') {
+    router.replace({ name: 'inventory' });
+  } else {
+    router.replace({ name: 'item-new', query: { manual: '1' } });
+  }
 }
 </script>
 
@@ -68,6 +86,13 @@ function manualFallback() {
     >
       ← Abbrechen
     </button>
+
+    <div
+      class="absolute right-4 top-4 z-10 rounded-full bg-black/60 px-3 py-1 text-xs"
+      style="margin-top: env(safe-area-inset-top)"
+    >
+      {{ mode === 'filter' ? 'Filter-Scan' : 'Anlegen' }}
+    </div>
 
     <video
       v-if="supported && !error"
@@ -94,7 +119,7 @@ function manualFallback() {
       </p>
       <p v-else>{{ error }}</p>
       <button class="btn-primary" @click="manualFallback">
-        Manuell eingeben
+        {{ mode === 'filter' ? 'Zurück zur Liste' : 'Manuell eingeben' }}
       </button>
     </div>
 
@@ -103,7 +128,7 @@ function manualFallback() {
       class="absolute inset-x-0 bottom-8 mx-auto block w-fit rounded-full bg-white/10 px-4 py-2 text-sm backdrop-blur"
       @click="manualFallback"
     >
-      Lieber manuell eingeben
+      {{ mode === 'filter' ? 'Abbrechen' : 'Lieber manuell eingeben' }}
     </button>
   </div>
 </template>

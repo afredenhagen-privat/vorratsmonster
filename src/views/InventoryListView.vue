@@ -1,20 +1,24 @@
 <script setup>
 import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import { useInventoryStore } from '../stores/inventoryStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { LOCATION_LABELS, LOCATIONS } from '../db/schema.js';
-import ExpiryBadge from '../components/ExpiryBadge.vue';
+import InventoryItem from '../components/InventoryItem.vue';
 
+const router = useRouter();
 const inventory = useInventoryStore();
 const ui = useUiStore();
-const { filterLocation, searchQuery } = storeToRefs(ui);
+const { filterLocation, filterOpened, filterBarcode, searchQuery } =
+  storeToRefs(ui);
 
 const visible = computed(() =>
   inventory.filtered({
     query: searchQuery.value,
-    location: filterLocation.value
+    location: filterLocation.value,
+    opened: filterOpened.value,
+    barcode: filterBarcode.value
   })
 );
 
@@ -23,10 +27,24 @@ const filterChips = [
   ...LOCATIONS.map((k) => ({ key: k, label: LOCATION_LABELS[k] }))
 ];
 
-function chipClass(key) {
+function locationChipClass(key) {
   return key === filterLocation.value
     ? 'chip bg-accent-600 text-white'
     : 'chip bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200';
+}
+
+const openedChipClass = computed(() =>
+  filterOpened.value
+    ? 'chip bg-amber-500 text-white'
+    : 'chip bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200'
+);
+
+function openScanFilter() {
+  router.push({ path: '/scan', query: { mode: 'filter' } });
+}
+
+function clearBarcodeFilter() {
+  ui.setBarcodeFilter(null);
 }
 </script>
 
@@ -34,66 +52,53 @@ function chipClass(key) {
   <div class="mx-auto flex max-w-md flex-col gap-3 p-4 pb-32">
     <header class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold">Vorrat</h1>
-      <RouterLink
-        to="/item/new?manual=1"
-        class="btn-secondary text-xs"
-        title="Manuell anlegen"
-      >
+      <RouterLink to="/item/new?manual=1" class="btn-secondary text-xs">
         + Manuell
       </RouterLink>
     </header>
 
-    <input
-      class="input"
-      type="search"
-      placeholder="Suchen…"
-      :value="searchQuery"
-      @input="ui.setSearchQuery($event.target.value)"
-    />
+    <div class="flex items-center gap-2">
+      <input
+        class="input flex-1"
+        type="search"
+        placeholder="Suchen…"
+        :value="searchQuery"
+        @input="ui.setSearchQuery($event.target.value)"
+      />
+      <button
+        type="button"
+        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-base hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
+        title="Per Scan suchen"
+        @click="openScanFilter"
+      >
+        📷
+      </button>
+    </div>
 
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <button
         v-for="c in filterChips"
         :key="String(c.key)"
-        :class="chipClass(c.key)"
+        :class="locationChipClass(c.key)"
         @click="ui.setLocationFilter(c.key)"
       >
         {{ c.label }}
       </button>
+      <button :class="openedChipClass" @click="ui.setOpenedFilter(!filterOpened)">
+        Angebrochen
+      </button>
+      <span
+        v-if="filterBarcode"
+        class="chip bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100"
+      >
+        Barcode: {{ filterBarcode }}
+        <button class="ml-2 font-bold" @click="clearBarcodeFilter">✕</button>
+      </span>
     </div>
 
     <ul v-if="visible.length" class="flex flex-col gap-2">
       <li v-for="item in visible" :key="item.id">
-        <RouterLink
-          :to="{ name: 'item-detail', params: { id: item.id } }"
-          class="card flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/60"
-        >
-          <img
-            v-if="item.image_url"
-            :src="item.image_url"
-            class="h-12 w-12 rounded object-cover"
-            alt=""
-          />
-          <div
-            v-else
-            class="flex h-12 w-12 items-center justify-center rounded bg-slate-200 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-          >
-            ohne Bild
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate font-medium">
-              {{ item.name }}
-              <span class="text-xs text-slate-500 dark:text-slate-400"
-                >· {{ item.quantity }} Stk</span
-              >
-            </div>
-            <div class="text-xs text-slate-500 dark:text-slate-400">
-              {{ LOCATION_LABELS[item.location] }} · MHD
-              {{ formatDate(item.best_before) }}
-            </div>
-          </div>
-          <ExpiryBadge :best-before="item.best_before" />
-        </RouterLink>
+        <InventoryItem :item="item" />
       </li>
     </ul>
 
@@ -101,7 +106,7 @@ function chipClass(key) {
       v-else
       class="card mt-8 text-center text-sm text-slate-500 dark:text-slate-400"
     >
-      Noch keine Vorräte. Tipp auf <strong>+ Scannen</strong> oder
+      Keine Treffer. Tipp auf <strong>+ Scannen</strong> oder
       <strong>+ Manuell</strong>.
     </div>
 
@@ -119,11 +124,3 @@ function chipClass(key) {
     </div>
   </div>
 </template>
-
-<script>
-function formatDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
-  return `${d}.${m}.${y}`;
-}
-</script>

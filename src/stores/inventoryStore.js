@@ -49,12 +49,20 @@ export const useInventoryStore = defineStore('inventory', {
 
     /**
      * Volltext-/Filter-Pipeline. Nimmt aktive Items und wendet optional
-     * Such- und Lagerortfilter an. Reihenfolge bleibt sortiert.
+     * Such-, Lagerort-, Anbruch- und Barcode-Filter an. Reihenfolge bleibt
+     * sortiert.
      */
-    filtered({ query = '', location = null } = {}) {
+    filtered({
+      query = '',
+      location = null,
+      opened = false,
+      barcode = null
+    } = {}) {
       const q = query.trim().toLowerCase();
       return this.active.filter((i) => {
         if (location && i.location !== location) return false;
+        if (opened && !i.is_opened) return false;
+        if (barcode && i.barcode !== barcode) return false;
         if (q && !i.name.toLowerCase().includes(q)) return false;
         return true;
       });
@@ -109,6 +117,104 @@ export const useInventoryStore = defineStore('inventory', {
       return target;
     },
 
+    /**
+     * Anbruch-Toggle. Setzt is_opened und opened_at synchron.
+     * Liefert den Item-Stand nach dem Toggle zurück, damit die UI
+     * eine Undo-Snackbar mit dem alten Zustand anzeigen kann.
+     */
+    async toggleOpened(id) {
+      const target = this.byId(id);
+      if (!target) throw new Error('Item nicht gefunden.');
+      const now = new Date().toISOString();
+      const next = !target.is_opened;
+      const patch = {
+        is_opened: next,
+        opened_at: next ? now : null,
+        updated_at: now
+      };
+      await db.items.update(id, patch);
+      Object.assign(target, patch);
+      return target;
+    },
+
+    /**
+     * Setzt is_opened/opened_at gezielt (für Undo).
+     */
+    async setOpened(id, isOpened, openedAt = null) {
+      const target = this.byId(id);
+      if (!target) throw new Error('Item nicht gefunden.');
+      const now = new Date().toISOString();
+      const patch = {
+        is_opened: Boolean(isOpened),
+        opened_at: isOpened ? openedAt ?? now : null,
+        updated_at: now
+      };
+      await db.items.update(id, patch);
+      Object.assign(target, patch);
+      return target;
+    },
+
+    /**
+     * Inkrementiert/dekrementiert die Menge. Erreicht der neue Wert 0,
+     * wird statt der Mengenänderung ein Soft-Delete ausgeführt — das
+     * passt zum gewünschten UX-Flow „letztes Stück verbraucht".
+     *
+     * Liefert ein Result-Objekt:
+     *   { kind: 'updated', item }  – Menge wurde geändert
+     *   { kind: 'deleted', item }  – Item wurde soft-deleted (Caller zeigt Undo-Snackbar)
+     */
+    async setQuantity(id, delta) {
+      const target = this.byId(id);
+      if (!target) throw new Error('Item nicht gefunden.');
+      const next = Math.max(0, (target.quantity ?? 1) + delta);
+      if (next === 0) {
+        await this.softDelete(id);
+        return { kind: 'deleted', item: target };
+      }
+      const now = new Date().toISOString();
+      await db.items.update(id, { quantity: next, updated_at: now });
+      target.quantity = next;
+      target.updated_at = now;
+      return { kind: 'updated', item: target };
+    },
+
+    /**
+     * Einfrieren: location → 'freezer', best_before um +6 Monate verlängern.
+     * Liefert den vorherigen Zustand als Snapshot zurück, damit eine Undo-
+     * Snackbar das Item per restoreSnapshot zurückrollen kann.
+     */
+    async freeze(id) {
+      const target = this.byId(id);
+      if (!target) throw new Error('Item nicht gefunden.');
+      const snapshot = {
+        location: target.location,
+        best_before: target.best_before
+      };
+      const newBestBefore = addMonthsToIsoDate(target.best_before, 6);
+      const now = new Date().toISOString();
+      const patch = {
+        location: 'freezer',
+        best_before: newBestBefore,
+        updated_at: now
+      };
+      await db.items.update(id, patch);
+      Object.assign(target, patch);
+      this._resort();
+      return { item: target, snapshot };
+    },
+
+    /** Snapshot zurückspielen (für Undo nach freeze). */
+    async restoreSnapshot(id, snapshot) {
+      const target = this.byId(id);
+      if (!target) throw new Error('Item nicht gefunden.');
+      const now = new Date().toISOString();
+      const patch = { ...snapshot, updated_at: now };
+      await db.items.update(id, patch);
+      Object.assign(target, patch);
+      this._resort();
+      return target;
+    },
+
     _resort() {
       this.items = sortByExpiry(this.items);
     }
@@ -157,4 +263,19 @@ export function sortByExpiry(rows) {
     }
     return a.name.localeCompare(b.name, 'de');
   });
+}
+
+/**
+ * Verschiebt ein ISO-Date um eine Anzahl Monate. Wenn der Zieltag im neuen
+ * Monat nicht existiert (z.B. 31.01 + 1 Monat), springt JavaScript's Date
+ * automatisch in den nächsten Monat — wir lassen das genau so, das ist die
+ * pragmatischste Variante für unseren Use-Case (Einfrieren).
+ */
+export function addMonthsToIsoDate(iso, months) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1 + months, d);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }

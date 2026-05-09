@@ -12,6 +12,8 @@ export const useUiStore = defineStore('ui', {
     snackbar: null,
     snackbarTimer: null,
     filterLocation: null,
+    filterOpened: false,
+    filterBarcode: null,
     searchQuery: ''
   }),
 
@@ -19,8 +21,20 @@ export const useUiStore = defineStore('ui', {
     setLocationFilter(location) {
       this.filterLocation = location;
     },
+    setOpenedFilter(b) {
+      this.filterOpened = Boolean(b);
+    },
+    setBarcodeFilter(barcode) {
+      this.filterBarcode = barcode || null;
+    },
     setSearchQuery(q) {
       this.searchQuery = q;
+    },
+    clearFilters() {
+      this.filterLocation = null;
+      this.filterOpened = false;
+      this.filterBarcode = null;
+      this.searchQuery = '';
     },
 
     /**
