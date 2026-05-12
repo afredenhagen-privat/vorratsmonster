@@ -27,7 +27,7 @@ const form = ref({
   category: null,
   quantity: 1,
   // best_before: defaultBestBefore(),
-  best_before: defaultBestBefore(),
+  best_before: '',
   location: 'fridge'
 });
 const loading = ref(false);
